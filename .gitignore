@@ -1,0 +1,71 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+
+# Node / Frontend
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# RAG / Data
+faiss_index/
+*.faiss
+chunks_cache.json
+
+# Logs
+*.log
+*.log.err
+*.err
+uvicorn*.log
+
+# Secrets
+.env
+.env.local
+*.env
+credentials/
+!credentials/.gitkeep
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Runtime data
+data/
+
+# Misc
+*.pyc
+*.pyd

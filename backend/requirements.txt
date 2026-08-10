@@ -1,0 +1,15 @@
+fastapi
+uvicorn[standard]
+python-multipart
+pydantic
+httpx
+motor
+pymongo
+certifi
+bcrypt
+python-jose[cryptography]
+google-api-python-client>=2.100.0
+google-auth>=2.23.0
+google-auth-oauthlib>=1.2.0
+# Reuse from root rag_system and NCKH if needed
+# pip install -r ../rag_system/requirements.txt
