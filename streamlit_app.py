@@ -7,6 +7,7 @@ separate FastAPI backend) and calls Gemini directly for generation.
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -71,12 +72,48 @@ def init_retriever():
         chunks = [Document(page_content=c["page_content"], metadata=c.get("metadata", {})) for c in cached]
 
     retriever = get_retriever(vectorstore, k=8, use_hybrid=True, chunks_for_bm25=chunks)
-    return retriever, embeddings
+    return retriever, embeddings, chunks
 
 
-def ask_gemini(question: str, retriever, embeddings) -> tuple[str, list[str]]:
+_DOC_NUMBER_RE = re.compile(r"(\d{1,3})\s*/\s*(MYH\d{2}|MY\d{2})", re.IGNORECASE)
+
+
+def find_by_doc_number(question: str, chunks: list) -> list:
+    """Exact-match lookup by official notice number (e.g. '91/MYH26').
+
+    This is independent of the embedding model: a weak/light model can rank
+    the right chunk poorly for a specific-number query, so we short-circuit
+    with a direct string match against the doc_number metadata whenever the
+    question clearly names a document number.
+    """
+    match = _DOC_NUMBER_RE.search(question)
+    if not match:
+        return []
+    number, year_code = match.group(1), match.group(2).upper()
+    hits = []
+    seen_sources = set()
+    for chunk in chunks:
+        doc_number = (chunk.metadata.get("doc_number") or "").upper()
+        if not doc_number:
+            continue
+        if doc_number.startswith(f"{number}/") and year_code in doc_number:
+            source = chunk.metadata.get("source")
+            if source not in seen_sources:
+                seen_sources.add(source)
+            hits.append(chunk)
+    return hits
+
+
+def ask_gemini(question: str, retriever, embeddings, chunks: list) -> tuple[str, list[str]]:
+    pinned = find_by_doc_number(question, chunks)
     candidates = retriever.invoke(question)
-    docs = rerank_documents(question, candidates, embeddings, top_k=5) if candidates else []
+    reranked = rerank_documents(question, candidates, embeddings, top_k=5) if candidates else []
+
+    seen = {(d.metadata.get("source"), d.metadata.get("chunk_id")) for d in pinned}
+    docs = pinned + [
+        d for d in reranked if (d.metadata.get("source"), d.metadata.get("chunk_id")) not in seen
+    ]
+    docs = docs[:5]
     context = format_context(docs, question)
     messages = build_prompt().format_messages(context=context, question=question)
     system_text = "\n\n".join(m.content for m in messages if getattr(m, "type", "") == "system")
@@ -112,7 +149,7 @@ if not GEMINI_API_KEY:
     st.error("Thiếu GEMINI_API_KEY. Vào Settings → Secrets trên Streamlit Cloud để thêm.")
     st.stop()
 
-retriever, embeddings = init_retriever()
+retriever, embeddings, all_chunks = init_retriever()
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -131,7 +168,7 @@ if question := st.chat_input("Hỏi về học phần, tuyển sinh, tốt nghi�
     with st.chat_message("assistant"):
         with st.spinner("Đang tìm câu trả lời..."):
             try:
-                answer, sources = ask_gemini(question, retriever, embeddings)
+                answer, sources = ask_gemini(question, retriever, embeddings, all_chunks)
             except Exception as exc:
                 answer, sources = f"Xin lỗi, có lỗi khi tạo câu trả lời: {exc}", []
         st.markdown(answer)
