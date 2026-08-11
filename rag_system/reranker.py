@@ -11,7 +11,7 @@ import unicodedata
 
 import numpy as np
 from langchain_core.documents import Document
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_core.embeddings import Embeddings
 
 from retrieval_rules import (
     TYPE_CAP_BANG,
@@ -98,7 +98,7 @@ def _doc_key(doc: Document) -> tuple:
 def rerank_documents(
     query: str,
     documents: List[Document],
-    embeddings: HuggingFaceEmbeddings,
+    embeddings: Embeddings,
     top_k: int = 5,
     return_scores: bool = False,
 ) -> List[Document] | List[tuple[Document, float]]:
@@ -179,7 +179,7 @@ def rerank_documents(
 def filter_relevant_chunks(
     query: str,
     documents: List[Document],
-    embeddings: HuggingFaceEmbeddings,
+    embeddings: Embeddings,
     min_score: float = 0.22,
     min_chunks: int = 1,
     strict: bool = False,

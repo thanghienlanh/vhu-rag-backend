@@ -12,7 +12,7 @@ from typing import List, Optional
 
 from langchain_core.documents import Document
 from langchain_experimental.text_splitter import SemanticChunker
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_core.embeddings import Embeddings
 
 from rag_config import SEMANTIC_BREAKPOINT_AMOUNT, SEMANTIC_BREAKPOINT_TYPE
 
@@ -37,7 +37,7 @@ TABLE_MARKERS = (
 )
 
 
-def get_semantic_chunker(embeddings: HuggingFaceEmbeddings) -> SemanticChunker:
+def get_semantic_chunker(embeddings: Embeddings) -> SemanticChunker:
     return SemanticChunker(
         embeddings=embeddings,
         breakpoint_threshold_type=SEMANTIC_BREAKPOINT_TYPE,
@@ -374,7 +374,7 @@ def structure_chunk_documents(documents: List[Document]) -> List[Document]:
 
 def semantic_chunk_documents(
     documents: List[Document],
-    embeddings: HuggingFaceEmbeddings,
+    embeddings: Embeddings,
 ) -> List[Document]:
     if not documents:
         return []
@@ -395,7 +395,7 @@ def semantic_chunk_documents(
 
 def chunk_documents(
     documents: List[Document],
-    embeddings: HuggingFaceEmbeddings,
+    embeddings: Embeddings,
 ) -> List[Document]:
     if CHUNK_STRATEGY == "semantic":
         return semantic_chunk_documents(documents, embeddings)

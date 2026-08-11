@@ -13,7 +13,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_ollama import OllamaLLM
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_core.embeddings import Embeddings
 
 from rag_config import (
     OLLAMA_MODEL, 
@@ -389,7 +389,7 @@ source, page, or citation.
 
 def build_rag_chain(
     retriever,
-    embeddings: Optional[HuggingFaceEmbeddings] = None,
+    embeddings: Optional[Embeddings] = None,
     final_k: int = None,
     all_chunks: Optional[List[Document]] = None,
 ):

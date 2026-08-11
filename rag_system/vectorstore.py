@@ -12,7 +12,7 @@ from typing import List, Dict, Any, Optional
 
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_core.embeddings import Embeddings
 
 from rag_config import FAISS_FULL_PATH, INITIAL_RETRIEVE_K, EMBEDDING_MODEL
 
@@ -82,7 +82,7 @@ def index_needs_rebuild(index_path: Path, embedding_model: str = None, corpus_fi
 
 def create_faiss_index(
     chunks: List[Document],
-    embeddings: HuggingFaceEmbeddings,
+    embeddings: Embeddings,
     index_path: Path = None,
     corpus_fingerprint: str = None,
 ) -> FAISS:
@@ -101,7 +101,7 @@ def create_faiss_index(
 
 
 def load_faiss_index(
-    embeddings: HuggingFaceEmbeddings,
+    embeddings: Embeddings,
     index_path: Path = None,
     corpus_fingerprint: str = None,
 ) -> FAISS:
