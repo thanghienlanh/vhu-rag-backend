@@ -9,6 +9,7 @@ import json
 import os
 import re
 import sys
+import time
 from pathlib import Path
 
 import httpx
@@ -46,6 +47,8 @@ def _secret_or_env(key: str, default: str = "") -> str:
 
 GEMINI_API_KEY = _secret_or_env("GEMINI_API_KEY")
 GEMINI_MODEL = _secret_or_env("GEMINI_MODEL", "gemini-2.5-flash-lite")
+GROQ_API_KEY = _secret_or_env("GROQ_API_KEY")
+GROQ_MODEL = _secret_or_env("GROQ_MODEL", "llama-3.3-70b-versatile")
 
 
 @st.cache_resource(show_spinner="Đang tải dữ liệu và mô hình (chỉ chạy 1 lần)...")
@@ -130,30 +133,108 @@ def sources_matching_academic_year(question: str, chunks: list) -> set:
     return sources
 
 
-def ask_gemini(question: str, retriever, embeddings, chunks: list) -> tuple[str, list[str]]:
-    pinned = find_by_doc_number(question, chunks)
-    candidates = retriever.invoke(question)
+_CONTACT_INTENT_RE = re.compile(r"địa điểm|ở đâu|liên hệ|hotline|số điện thoại", re.IGNORECASE)
+_CONTACT_INFO_RE = re.compile(r"hotline|trụ sở|đường dây nóng", re.IGNORECASE)
 
-    # If the question names a specific academic year (e.g. "2026-2027"),
-    # prefer already-retrieved chunks from documents naming that same year
-    # over the reranker's opinion — near-duplicate notices from different
-    # semesters otherwise get reranked almost interchangeably.
-    year_sources = sources_matching_academic_year(question, chunks)
-    if year_sources:
-        pinned += [d for d in candidates if d.metadata.get("source") in year_sources][:2]
 
-    reranked = rerank_documents(question, candidates, embeddings, top_k=5) if candidates else []
+def find_contact_chunks(question: str, candidates: list, chunks: list) -> list:
+    """When the question asks where/how to contact, pin the chunk with the
+    actual address/hotline for any source already surfaced by retrieval.
 
-    seen = {(d.metadata.get("source"), d.metadata.get("chunk_id")) for d in pinned}
-    docs = pinned + [
-        d for d in reranked if (d.metadata.get("source"), d.metadata.get("chunk_id")) not in seen
-    ]
-    docs = docs[:5]
-    context = format_context(docs, question)
-    messages = build_prompt().format_messages(context=context, question=question)
-    system_text = "\n\n".join(m.content for m in messages if getattr(m, "type", "") == "system")
-    user_text = "\n\n".join(m.content for m in messages if getattr(m, "type", "") != "system")
+    Contact info is usually a short closing paragraph at the end of a notice
+    ('Mọi thông tin liên hệ: ... Hotline: ...'). It shares little semantic
+    overlap with a location/contact question compared to the notice's main
+    body text, so reranking alone tends to prefer the wrong chunk from the
+    same (correct) document.
+    """
+    if not _CONTACT_INTENT_RE.search(question):
+        return []
+    candidate_sources = {d.metadata.get("source") for d in candidates}
+    hits = []
+    for c in chunks:
+        if c.metadata.get("source") in candidate_sources and _CONTACT_INFO_RE.search(c.page_content):
+            hits.append(c)
+    return hits
 
+
+_TABLE_ROW_RE = re.compile(r"^\s*\d{1,2}\.\s")
+_TABLE_HEADER_RE = re.compile(r"đợt\s*1", re.IGNORECASE)
+
+
+def pin_table_header_chunks(docs: list, chunks: list) -> list:
+    """When a selected chunk looks like a mid-table numbered row (e.g. an
+    'Đợt 1 / Đợt 2 / Đợt 3' schedule table whose header only appears once
+    per page), also pin that source's chunk carrying the column header —
+    without it, values in the row can't be mapped to the right 'đợt'.
+    """
+    by_source: dict = {}
+    for c in chunks:
+        by_source.setdefault(c.metadata.get("source"), []).append(c)
+
+    seen = {(d.metadata.get("source"), d.metadata.get("chunk_id")) for d in docs}
+    extra = []
+    for d in docs:
+        content = d.page_content
+        if not _TABLE_ROW_RE.match(content) or _TABLE_HEADER_RE.search(content[:200]):
+            continue
+        source = d.metadata.get("source")
+        siblings = sorted(by_source.get(source, []), key=lambda c: c.metadata.get("chunk_id", 0))
+        for c in siblings:
+            if _TABLE_HEADER_RE.search(c.page_content):
+                key = (c.metadata.get("source"), c.metadata.get("chunk_id"))
+                if key not in seen:
+                    extra.append(c)
+                    seen.add(key)
+                break
+    return extra
+
+
+_VN_WORD_RE = re.compile(
+    r"[a-zàáảãạăắằẳẵặâấầẩẫậđèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵ]+"
+)
+_STOPWORDS = {
+    "và", "là", "của", "vào", "khi", "nào", "cho", "các", "với", "đợt",
+    "năm", "tháng", "tuần", "sinh", "viên", "trong", "về", "đến", "được",
+}
+
+
+def pin_relevant_table_rows(question: str, docs: list, chunks: list) -> list:
+    """For a source already selected whose chunk looks like a numbered row of
+    an 'Đợt 1/Đợt 2/...' schedule table, also pull in sibling row-chunks from
+    that same source with strong keyword overlap with the question.
+
+    The row that actually answers a specific 'đợt N' question may sit in a
+    different row-chunk than the one the reranker happened to pick — this
+    only searches within a source already confirmed relevant by retrieval,
+    so the blast radius stays limited to that one document.
+    """
+    by_source: dict = {}
+    for c in chunks:
+        by_source.setdefault(c.metadata.get("source"), []).append(c)
+
+    q_words = set(_VN_WORD_RE.findall(question.lower())) - _STOPWORDS
+
+    seen = {(d.metadata.get("source"), d.metadata.get("chunk_id")) for d in docs}
+    extra = []
+    for d in docs:
+        if not _TABLE_ROW_RE.match(d.page_content):
+            continue
+        source = d.metadata.get("source")
+        siblings = by_source.get(source, [])
+        if not any(_TABLE_HEADER_RE.search(c.page_content) for c in siblings):
+            continue
+        for c in siblings:
+            key = (c.metadata.get("source"), c.metadata.get("chunk_id"))
+            if key in seen or not _TABLE_ROW_RE.match(c.page_content):
+                continue
+            c_words = set(_VN_WORD_RE.findall(c.page_content.lower()))
+            if len(q_words & c_words) >= 2:
+                extra.append(c)
+                seen.add(key)
+    return extra
+
+
+def _call_gemini(system_text: str, user_text: str) -> str:
     payload = {
         "contents": [{"role": "user", "parts": [{"text": user_text}]}],
         "generationConfig": {"temperature": 0.0, "maxOutputTokens": 512},
@@ -172,9 +253,87 @@ def ask_gemini(question: str, retriever, embeddings, chunks: list) -> tuple[str,
         for part in candidate.get("content", {}).get("parts", []):
             if "text" in part:
                 parts.append(part["text"])
+    return "".join(parts).strip()
+
+
+def _call_groq(system_text: str, user_text: str) -> str:
+    messages = []
+    if system_text:
+        messages.append({"role": "system", "content": system_text})
+    messages.append({"role": "user", "content": user_text})
+
+    payload = {
+        "model": GROQ_MODEL,
+        "messages": messages,
+        "temperature": 0.0,
+        "max_tokens": 512,
+    }
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
+
+    # Groq's own free-tier rate limit can trip under back-to-back requests
+    # (e.g. several students asking in quick succession). Retry with backoff
+    # before giving up, since the window is short-lived (per-minute).
+    last_exc = None
+    for attempt, wait in enumerate((0, 5, 15)):
+        if wait:
+            time.sleep(wait)
+        with httpx.Client(timeout=60) as client:
+            resp = client.post(url, headers=headers, json=payload)
+        if resp.status_code == 429:
+            last_exc = httpx.HTTPStatusError(
+                f"Groq 429 (attempt {attempt + 1})", request=resp.request, response=resp
+            )
+            continue
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"].strip()
+    raise last_exc
+
+
+def ask_llm(question: str, retriever, embeddings, chunks: list) -> tuple[str, list[str], str]:
+    pinned = find_by_doc_number(question, chunks)
+    candidates = retriever.invoke(question)
+
+    # If the question names a specific academic year (e.g. "2026-2027"),
+    # prefer already-retrieved chunks from documents naming that same year
+    # over the reranker's opinion — near-duplicate notices from different
+    # semesters otherwise get reranked almost interchangeably.
+    year_sources = sources_matching_academic_year(question, chunks)
+    if year_sources:
+        pinned += [d for d in candidates if d.metadata.get("source") in year_sources][:2]
+
+    pinned += find_contact_chunks(question, candidates, chunks)
+
+    reranked = rerank_documents(question, candidates, embeddings, top_k=5) if candidates else []
+
+    seen = {(d.metadata.get("source"), d.metadata.get("chunk_id")) for d in pinned}
+    docs = pinned + [
+        d for d in reranked if (d.metadata.get("source"), d.metadata.get("chunk_id")) not in seen
+    ]
+    docs = docs[:5]
+    extra_rows = pin_relevant_table_rows(question, docs, chunks)
+    extra_headers = pin_table_header_chunks(docs + extra_rows, chunks)
+    # Put surgical fix-ups first so they survive format_context's char budget
+    # even when the original top-5 already fills most of it.
+    docs = extra_rows + extra_headers + docs
+    context = format_context(docs, question)
+    messages = build_prompt().format_messages(context=context, question=question)
+    system_text = "\n\n".join(m.content for m in messages if getattr(m, "type", "") == "system")
+    user_text = "\n\n".join(m.content for m in messages if getattr(m, "type", "") != "system")
 
     sources = sorted({d.metadata.get("source", "") for d in docs if d.metadata.get("source")})
-    return "".join(parts).strip(), sources
+
+    # Gemini is the primary provider (proven accuracy on this corpus). If its
+    # free-tier quota is exhausted (HTTP 429), fall back to Groq automatically
+    # rather than showing the user an error.
+    try:
+        answer = _call_gemini(system_text, user_text)
+        return answer, sources, "gemini"
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code != 429 or not GROQ_API_KEY:
+            raise
+    answer = _call_groq(system_text, user_text)
+    return answer, sources, "groq"
 
 
 st.title("📚 VHU Document Assistant")
@@ -203,10 +362,12 @@ if question := st.chat_input("Hỏi về học phần, tuyển sinh, tốt nghi�
     with st.chat_message("assistant"):
         with st.spinner("Đang tìm câu trả lời..."):
             try:
-                answer, sources = ask_gemini(question, retriever, embeddings, all_chunks)
+                answer, sources, provider = ask_llm(question, retriever, embeddings, all_chunks)
             except Exception as exc:
-                answer, sources = f"Xin lỗi, có lỗi khi tạo câu trả lời: {exc}", []
+                answer, sources, provider = f"Xin lỗi, có lỗi khi tạo câu trả lời: {exc}", [], None
         st.markdown(answer)
         if sources:
             st.caption("Nguồn: " + ", ".join(sources))
+        if provider == "groq":
+            st.caption("⚡ Trả lời bởi Groq (Gemini tạm hết quota)")
     st.session_state.messages.append({"role": "assistant", "content": answer, "sources": sources})
