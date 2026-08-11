@@ -104,9 +104,44 @@ def find_by_doc_number(question: str, chunks: list) -> list:
     return hits
 
 
+_YEAR_RANGE_RE = re.compile(r"(20\d{2})\s*[-–]\s*(20\d{2})")
+
+
+def sources_matching_academic_year(question: str, chunks: list) -> set:
+    """Identify which source files explicitly name the academic year range
+    in the question (e.g. '2026-2027').
+
+    Several notices (đăng ký học phần for different semesters) share near-
+    identical wording and only differ by year — a weak embedding model
+    reranks them almost interchangeably. We don't rely on any single chunk
+    repeating the year phrase (chunking may split it away from the table);
+    instead we just tag which *documents* mention that year range anywhere,
+    then let the caller prefer already-retrieved chunks from those documents.
+    """
+    match = _YEAR_RANGE_RE.search(question)
+    if not match:
+        return set()
+    year_range = f"{match.group(1)}-{match.group(2)}"
+    sources = set()
+    for chunk in chunks:
+        text = re.sub(r"\s+", "", chunk.page_content.replace("–", "-"))
+        if year_range in text and "nămhọc" in text.lower():
+            sources.add(chunk.metadata.get("source"))
+    return sources
+
+
 def ask_gemini(question: str, retriever, embeddings, chunks: list) -> tuple[str, list[str]]:
     pinned = find_by_doc_number(question, chunks)
     candidates = retriever.invoke(question)
+
+    # If the question names a specific academic year (e.g. "2026-2027"),
+    # prefer already-retrieved chunks from documents naming that same year
+    # over the reranker's opinion — near-duplicate notices from different
+    # semesters otherwise get reranked almost interchangeably.
+    year_sources = sources_matching_academic_year(question, chunks)
+    if year_sources:
+        pinned += [d for d in candidates if d.metadata.get("source") in year_sources][:2]
+
     reranked = rerank_documents(question, candidates, embeddings, top_k=5) if candidates else []
 
     seen = {(d.metadata.get("source"), d.metadata.get("chunk_id")) for d in pinned}
