@@ -11,9 +11,9 @@ PAPERS_DIR: str = str(Path(__file__).parent / "papers")
 FAISS_INDEX_DIR: str = "faiss_index"
 
 # === Models ===
-# Quantized BGE-M3 (fastembed/ONNX int8, ~570MB) — fits small deployment
-# targets. Thay thế: bkai-foundation-models/vietnamese-bi-encoder
-_DEFAULT_EMBEDDING = "Xenova/bge-m3-quantized"
+# Lightweight multilingual embeddings (fastembed/ONNX, ~220MB) — fits
+# 512MB-RAM free-tier hosting where even quantized BGE-M3 (~570MB) doesn't.
+_DEFAULT_EMBEDDING = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", _DEFAULT_EMBEDDING)
 # 3B model nhanh hơn trên CPU; override bằng OLLAMA_MODEL trong .env
 OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "qwen2.5:3b")

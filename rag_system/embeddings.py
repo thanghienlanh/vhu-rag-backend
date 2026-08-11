@@ -1,13 +1,9 @@
 """
 embeddings.py
-Quantized BGE-M3 embeddings via fastembed (ONNX int8), sized to fit small
-deployment targets (~570MB vs ~2.3GB for the full-precision model).
-
-Wraps fastembed.TextEmbedding directly (instead of langchain_community's
-FastEmbedEmbeddings) so we can tune ONNX Runtime session memory: disabling
-the CPU memory arena and pinning to a single thread trims the extra
-allocator/thread-pool overhead on top of the model weights themselves —
-every MB matters when the host RAM ceiling sits right at the model size.
+Lightweight multilingual embeddings via fastembed (ONNX, ~220MB), sized to
+fit free-tier hosting (512MB RAM ceilings). BGE-M3 — even int8-quantized
+(~570MB) — does not fit; this model trades some retrieval quality for
+guaranteed headroom under low-RAM hosts.
 """
 
 import os
@@ -15,34 +11,14 @@ from typing import List
 
 from langchain_core.embeddings import Embeddings
 
-_CUSTOM_MODEL_NAME = "Xenova/bge-m3-quantized"
+_DEFAULT_MODEL_NAME = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 _cached_embeddings: "FastEmbedONNXEmbeddings | None" = None
 
 
-def _register_quantized_bge_m3() -> None:
-    from fastembed import TextEmbedding
-    from fastembed.common.model_description import ModelSource, PoolingType
-
-    already_registered = any(
-        m["model"] == _CUSTOM_MODEL_NAME for m in TextEmbedding.list_supported_models()
-    )
-    if already_registered:
-        return
-
-    TextEmbedding.add_custom_model(
-        model=_CUSTOM_MODEL_NAME,
-        pooling=PoolingType.CLS,
-        normalization=True,
-        sources=ModelSource(hf="Xenova/bge-m3"),
-        dim=1024,
-        model_file="onnx/model_quantized.onnx",
-    )
-
-
 class FastEmbedONNXEmbeddings(Embeddings):
-    """Minimal LangChain-compatible wrapper giving direct access to ONNX
-    Runtime session tuning (thread count, memory arena) that the stock
-    langchain_community.FastEmbedEmbeddings does not expose.
+    """Minimal LangChain-compatible wrapper around fastembed.TextEmbedding,
+    with ONNX Runtime session tuning (thread count, memory arena) exposed —
+    the stock langchain_community.FastEmbedEmbeddings does not expose these.
     """
 
     def __init__(self, model_name: str, threads: int = 1, enable_cpu_mem_arena: bool = False):
@@ -63,18 +39,15 @@ class FastEmbedONNXEmbeddings(Embeddings):
 
 def get_embeddings(force_reload: bool = False) -> FastEmbedONNXEmbeddings:
     """
-    Returns quantized BGE-M3 embeddings (singleton).
+    Returns multilingual embeddings (singleton).
     Model will be downloaded on first use (stored in ~/.cache/fastembed).
     """
     global _cached_embeddings
     if _cached_embeddings is not None and not force_reload:
         return _cached_embeddings
 
-    model_name = os.getenv("EMBEDDING_MODEL", _CUSTOM_MODEL_NAME)
-    print(f"Loading embedding model: {model_name} (fastembed, ONNX int8, 1 thread, no mem arena)...")
-
-    if model_name == _CUSTOM_MODEL_NAME:
-        _register_quantized_bge_m3()
+    model_name = os.getenv("EMBEDDING_MODEL", _DEFAULT_MODEL_NAME)
+    print(f"Loading embedding model: {model_name} (fastembed, ONNX, 1 thread, no mem arena)...")
 
     embeddings = FastEmbedONNXEmbeddings(model_name=model_name)
     _ = embeddings.embed_query("sinh viên đăng ký học phần")
