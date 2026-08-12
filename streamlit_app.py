@@ -459,11 +459,13 @@ if question := st.chat_input("Hỏi về học phần, tuyển sinh, tốt nghi�
         with st.spinner("Đang tìm câu trả lời..."):
             try:
                 answer, sources, provider = ask_llm(question, retriever, embeddings, all_chunks)
-            except Exception as exc:
-                answer, sources, provider = f"Xin lỗi, có lỗi khi tạo câu trả lời: {exc}", [], None
+            except Exception:
+                answer, sources, provider = (
+                    "Xin lỗi, hệ thống đang quá tải. Vui lòng thử lại sau ít phút.",
+                    [],
+                    None,
+                )
         st.markdown(answer)
         if sources:
             st.caption("Nguồn: " + ", ".join(sources))
-        if provider == "groq":
-            st.caption("⚡ Trả lời bởi Groq (Gemini tạm hết quota)")
     st.session_state.messages.append({"role": "assistant", "content": answer, "sources": sources})
