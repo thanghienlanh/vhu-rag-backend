@@ -215,11 +215,12 @@ def pin_table_header_chunks(docs: list, chunks: list) -> list:
     return extra
 
 
+_LIST_INTENT_RE = re.compile(r"giảng viên|danh sách|bao nhiêu người|liệt kê", re.IGNORECASE)
 _LIST_TABLE_HEADER_RE = re.compile(r"STT\s+HỌ\s*TÊN|danh sách giảng viên", re.IGNORECASE)
 _DOC_END_MARKER_RE = re.compile(r"TUQ\.|PHÓ TRƯỞNG|HIỆU TRƯỞNG|GIÁM ĐỐC ĐIỀU HÀNH|Nơi nhận:", re.IGNORECASE)
 
 
-def pin_list_continuation_chunks(candidates: list, chunks: list) -> list:
+def pin_list_continuation_chunks(question: str, candidates: list, chunks: list, already_included: set) -> list:
     """When a source already surfaced by retrieval opens a numbered list/
     table (e.g. a lecturer roster with 'STT | HỌ TÊN | EMAIL...' columns)
     somewhere in its chunks, but that opening chunk doesn't yet contain the
@@ -232,7 +233,15 @@ def pin_list_continuation_chunks(candidates: list, chunks: list) -> list:
     already-narrowed top picks) — reranking a single ~100-word roster row
     against the full question can rank inconsistently, so relying on the
     opening chunk already being in the final top-k is fragile.
+
+    Gated on question intent (not just any candidate source happening to
+    contain a roster) so it doesn't pull unrelated content — and skipped for
+    chunks in `already_included` to avoid duplicating a chunk already headed
+    into the context, which can visibly confuse the model.
     """
+    if not _LIST_INTENT_RE.search(question):
+        return []
+
     by_source: dict = {}
     for c in chunks:
         by_source.setdefault(c.metadata.get("source"), []).append(c)
@@ -240,7 +249,7 @@ def pin_list_continuation_chunks(candidates: list, chunks: list) -> list:
         by_source[src].sort(key=lambda c: c.metadata.get("chunk_id", 0))
 
     candidate_sources = {d.metadata.get("source") for d in candidates}
-    seen: set = set()
+    seen: set = set(already_included)
     extra = []
     for c0 in chunks:
         source = c0.metadata.get("source")
@@ -396,7 +405,8 @@ def ask_llm(question: str, retriever, embeddings, chunks: list) -> tuple[str, li
     docs = docs[: 3 if contact_chunks else 5]
     extra_rows = pin_relevant_table_rows(question, docs, chunks)
     extra_headers = pin_table_header_chunks(docs + extra_rows, chunks)
-    extra_continuation = pin_list_continuation_chunks(candidates, chunks)
+    already_included = {(d.metadata.get("source"), d.metadata.get("chunk_id")) for d in docs + extra_rows + extra_headers}
+    extra_continuation = pin_list_continuation_chunks(question, candidates, chunks, already_included)
     # Put surgical fix-ups first so they survive format_context's char budget
     # even when the original top-5 already fills most of it.
     docs = extra_rows + extra_headers + extra_continuation + docs

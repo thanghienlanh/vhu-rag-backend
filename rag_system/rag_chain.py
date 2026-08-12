@@ -366,7 +366,7 @@ Quy tắc:
 4. Không trộn thông tin giữa các tài liệu/chủ đề khác nhau nếu câu hỏi yêu cầu một đối tượng, khoa, năm học, học kỳ hoặc mốc thời gian cụ thể.
 5. Với câu hỏi có nhiều ý, trả lời đủ từng ý. Dùng gạch đầu dòng khi cần liệt kê điều kiện, thời gian, quy trình hoặc so sánh.
 6. Khi CONTEXT có bảng/lịch với nhiều dòng giống nhau, chọn đúng dòng khớp đầy đủ tất cả điều kiện trong câu hỏi; không lấy ngày hoặc số liệu từ dòng liền trước/liền sau.
-7. Với câu hỏi dạng Có/Không: nếu CONTEXT nêu điều kiện đủ (ví dụ "từ năm thứ 2 trở lên") thì suy luận rõ ràng (ví dụ năm 1 → Không) và trích dẫn điều kiện đó.
+7. QUAN TRỌNG — câu hỏi dạng Có/Không hoặc "X có đủ điều kiện Y không": một điều kiện/phạm vi áp dụng nêu trong CONTEXT (ví dụ "áp dụng cho sinh viên từ năm thứ 2 trở lên", "chỉ dành cho khóa 2023") LUÔN LÀ bằng chứng đầy đủ để trả lời — kể cả khi đối tượng trong câu hỏi không được nhắc tên trực tiếp. Đây KHÔNG được coi là "không đủ bằng chứng". Bắt buộc suy luận và trả lời rõ ràng, ví dụ: hỏi "sinh viên năm 1 có được đăng ký không" mà CONTEXT ghi "áp dụng từ năm thứ 2 trở lên" → trả lời "Không, vì quy định chỉ áp dụng từ năm thứ 2 trở lên" kèm trích dẫn. Không được trả lời "{no_info_answer}" trong trường hợp này.
 8. Với câu hỏi về đối tượng/điều kiện, trả lời đầy đủ các ràng buộc trong CONTEXT (khóa, năm học, khoa, số lượng...), không rút gọn thành câu chung chung.
 9. Với câu hỏi yêu cầu liệt kê (đợt, danh sách, mốc thời gian), liệt kê các mục có trong CONTEXT; nếu CONTEXT chỉ có một phần thì trả lời phần đó.
 10. Kết thúc bằng dòng: Nguồn: [tên file chính xác]. Chỉ liệt kê file thật sự được dùng để tạo câu trả lời.
