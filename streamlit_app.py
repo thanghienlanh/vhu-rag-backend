@@ -210,6 +210,45 @@ def pin_table_header_chunks(docs: list, chunks: list) -> list:
     return extra
 
 
+_LIST_TABLE_HEADER_RE = re.compile(r"STT\s+HỌ\s*TÊN|danh sách giảng viên", re.IGNORECASE)
+_DOC_END_MARKER_RE = re.compile(r"TUQ\.|PHÓ TRƯỞNG|HIỆU TRƯỞNG|GIÁM ĐỐC ĐIỀU HÀNH|Nơi nhận:", re.IGNORECASE)
+
+
+def pin_list_continuation_chunks(docs: list, chunks: list) -> list:
+    """When a selected chunk opens a numbered list/table (e.g. a lecturer
+    roster with 'STT | HỌ TÊN | EMAIL...' columns) but doesn't yet contain
+    the document's closing signature block, the list runs past the chunk's
+    character limit into the next chunk(s) of the same source — pin those
+    too so the full roster (and its count) reaches the model.
+    """
+    by_source: dict = {}
+    for c in chunks:
+        by_source.setdefault(c.metadata.get("source"), []).append(c)
+    for src in by_source:
+        by_source[src].sort(key=lambda c: c.metadata.get("chunk_id", 0))
+
+    seen = {(d.metadata.get("source"), d.metadata.get("chunk_id")) for d in docs}
+    extra = []
+    for d in docs:
+        if not _LIST_TABLE_HEADER_RE.search(d.page_content):
+            continue
+        if _DOC_END_MARKER_RE.search(d.page_content):
+            continue
+        source = d.metadata.get("source")
+        cur_id = d.metadata.get("chunk_id")
+        for c in by_source.get(source, []):
+            cid = c.metadata.get("chunk_id")
+            if cid is None or cid <= cur_id:
+                continue
+            key = (source, cid)
+            if key not in seen:
+                extra.append(c)
+                seen.add(key)
+            if _DOC_END_MARKER_RE.search(c.page_content):
+                break
+    return extra
+
+
 _VN_WORD_RE = re.compile(
     r"[a-zàáảãạăắằẳẵặâấầẩẫậđèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵ]+"
 )
@@ -338,9 +377,10 @@ def ask_llm(question: str, retriever, embeddings, chunks: list) -> tuple[str, li
     docs = docs[: 3 if contact_chunks else 5]
     extra_rows = pin_relevant_table_rows(question, docs, chunks)
     extra_headers = pin_table_header_chunks(docs + extra_rows, chunks)
+    extra_continuation = pin_list_continuation_chunks(docs, chunks)
     # Put surgical fix-ups first so they survive format_context's char budget
     # even when the original top-5 already fills most of it.
-    docs = extra_rows + extra_headers + docs
+    docs = extra_rows + extra_headers + extra_continuation + docs
     context = format_context(docs, question)
     messages = build_prompt().format_messages(context=context, question=question)
     system_text = "\n\n".join(m.content for m in messages if getattr(m, "type", "") == "system")
