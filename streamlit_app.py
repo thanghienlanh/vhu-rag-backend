@@ -359,11 +359,13 @@ def _call_groq(system_text: str, user_text: str) -> str:
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
 
-    # Groq's own free-tier rate limit can trip under back-to-back requests
-    # (e.g. several students asking in quick succession). Retry with backoff
-    # before giving up, since the window is short-lived (per-minute).
+    # Groq's free-tier TPM budget (12000 tokens/min) is easily used up by a
+    # single context-heavy request. Retrying quickly makes this worse, not
+    # better — each retry spends more of the same budget before it has had
+    # time to refill. Two tries with a real gap in between is more likely to
+    # land inside a fresh window than three tries crammed into ~20s.
     last_exc = None
-    for attempt, wait in enumerate((0, 5, 15)):
+    for attempt, wait in enumerate((0, 35)):
         if wait:
             time.sleep(wait)
         with httpx.Client(timeout=60) as client:
