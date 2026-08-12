@@ -134,22 +134,43 @@ def sources_matching_academic_year(question: str, chunks: list) -> set:
 
 
 _CONTACT_INTENT_RE = re.compile(r"địa điểm|ở đâu|liên hệ|hotline|số điện thoại", re.IGNORECASE)
-_CONTACT_INFO_RE = re.compile(r"hotline|trụ sở|đường dây nóng", re.IGNORECASE)
+_CONTACT_INFO_RE = re.compile(r"hotline|trụ sở|đường dây nóng|địa điểm|địa chỉ", re.IGNORECASE)
+_DOT_BATCH_RE = re.compile(r"đợt\s*(\d)\s*/\s*(20\d{2})", re.IGNORECASE)
 
 
 def find_contact_chunks(question: str, candidates: list, chunks: list) -> list:
     """When the question asks where/how to contact, pin the chunk with the
-    actual address/hotline for any source already surfaced by retrieval.
+    actual address/hotline for the source already surfaced by retrieval.
 
     Contact info is usually a short closing paragraph at the end of a notice
     ('Mọi thông tin liên hệ: ... Hotline: ...'). It shares little semantic
     overlap with a location/contact question compared to the notice's main
     body text, so reranking alone tends to prefer the wrong chunk from the
     same (correct) document.
+
+    Almost every VHU notice ends with this same boilerplate, so multiple
+    unrelated candidate sources can match — if the question names a specific
+    "đợt N/YYYY" batch, only pin the source whose own text also names that
+    exact batch, to avoid mixing in another notice's contact block.
     """
     if not _CONTACT_INTENT_RE.search(question):
         return []
     candidate_sources = {d.metadata.get("source") for d in candidates}
+
+    batch_match = _DOT_BATCH_RE.search(question)
+    if batch_match:
+        num, year = batch_match.group(1), batch_match.group(2)
+        batch_sources = set()
+        for c in chunks:
+            src = c.metadata.get("source")
+            if src not in candidate_sources:
+                continue
+            text = re.sub(r"\s+", " ", c.page_content.lower())
+            if re.search(rf"đợt\s*{num}\b.{{0,15}}{year}|{year}.{{0,15}}đợt\s*{num}\b", text):
+                batch_sources.add(src)
+        if batch_sources:
+            candidate_sources = batch_sources
+
     hits = []
     for c in chunks:
         if c.metadata.get("source") in candidate_sources and _CONTACT_INFO_RE.search(c.page_content):
@@ -302,7 +323,8 @@ def ask_llm(question: str, retriever, embeddings, chunks: list) -> tuple[str, li
     if year_sources:
         pinned += [d for d in candidates if d.metadata.get("source") in year_sources][:2]
 
-    pinned += find_contact_chunks(question, candidates, chunks)
+    contact_chunks = find_contact_chunks(question, candidates, chunks)
+    pinned += contact_chunks
 
     reranked = rerank_documents(question, candidates, embeddings, top_k=5) if candidates else []
 
@@ -310,7 +332,10 @@ def ask_llm(question: str, retriever, embeddings, chunks: list) -> tuple[str, li
     docs = pinned + [
         d for d in reranked if (d.metadata.get("source"), d.metadata.get("chunk_id")) not in seen
     ]
-    docs = docs[:5]
+    # A confident contact-info pin already answers the question directly —
+    # keep the context small so an unrelated notice (same "tốt nghiệp" topic,
+    # different đợt/year) doesn't crowd it out for weaker fallback models.
+    docs = docs[: 3 if contact_chunks else 5]
     extra_rows = pin_relevant_table_rows(question, docs, chunks)
     extra_headers = pin_table_header_chunks(docs + extra_rows, chunks)
     # Put surgical fix-ups first so they survive format_context's char budget
