@@ -179,7 +179,12 @@ def find_contact_chunks(question: str, candidates: list, chunks: list) -> list:
 
 
 _TABLE_ROW_RE = re.compile(r"^\s*\d{1,2}\.\s")
-_TABLE_HEADER_RE = re.compile(r"đợt\s*1", re.IGNORECASE)
+# Require the "Đợt 1/YYYY ... Đợt 2/YYYY" column-header format (year glued
+# directly to the đợt number) — unique to the parallel-column schedule table
+# (e.g. lộ trình tốt nghiệp). A plain sequential "1. Đợt 1 ... 2. Đợt 2 ..."
+# list (as in an unrelated GDQP-AN registration table) doesn't attach a year
+# this way and must not trigger this fix-up.
+_TABLE_HEADER_RE = re.compile(r"đợt\s*1\s*/\s*20\d{2}.{0,150}đợt\s*2\s*/\s*20\d{2}", re.IGNORECASE | re.DOTALL)
 
 
 def pin_table_header_chunks(docs: list, chunks: list) -> list:
