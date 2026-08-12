@@ -214,12 +214,19 @@ _LIST_TABLE_HEADER_RE = re.compile(r"STT\s+HỌ\s*TÊN|danh sách giảng viên"
 _DOC_END_MARKER_RE = re.compile(r"TUQ\.|PHÓ TRƯỞNG|HIỆU TRƯỞNG|GIÁM ĐỐC ĐIỀU HÀNH|Nơi nhận:", re.IGNORECASE)
 
 
-def pin_list_continuation_chunks(docs: list, chunks: list) -> list:
-    """When a selected chunk opens a numbered list/table (e.g. a lecturer
-    roster with 'STT | HỌ TÊN | EMAIL...' columns) but doesn't yet contain
-    the document's closing signature block, the list runs past the chunk's
-    character limit into the next chunk(s) of the same source — pin those
-    too so the full roster (and its count) reaches the model.
+def pin_list_continuation_chunks(candidates: list, chunks: list) -> list:
+    """When a source already surfaced by retrieval opens a numbered list/
+    table (e.g. a lecturer roster with 'STT | HỌ TÊN | EMAIL...' columns)
+    somewhere in its chunks, but that opening chunk doesn't yet contain the
+    document's closing signature block, the list runs past one chunk's
+    character limit into the next chunk(s) — pin the opener plus everything
+    up to (and including) the closing chunk so the full roster reaches the
+    model.
+
+    Searches every chunk of each candidate *source* (not just the reranker's
+    already-narrowed top picks) — reranking a single ~100-word roster row
+    against the full question can rank inconsistently, so relying on the
+    opening chunk already being in the final top-k is fragile.
     """
     by_source: dict = {}
     for c in chunks:
@@ -227,15 +234,22 @@ def pin_list_continuation_chunks(docs: list, chunks: list) -> list:
     for src in by_source:
         by_source[src].sort(key=lambda c: c.metadata.get("chunk_id", 0))
 
-    seen = {(d.metadata.get("source"), d.metadata.get("chunk_id")) for d in docs}
+    candidate_sources = {d.metadata.get("source") for d in candidates}
+    seen: set = set()
     extra = []
-    for d in docs:
-        if not _LIST_TABLE_HEADER_RE.search(d.page_content):
+    for c0 in chunks:
+        source = c0.metadata.get("source")
+        if source not in candidate_sources:
             continue
-        if _DOC_END_MARKER_RE.search(d.page_content):
+        if not _LIST_TABLE_HEADER_RE.search(c0.page_content):
             continue
-        source = d.metadata.get("source")
-        cur_id = d.metadata.get("chunk_id")
+        if _DOC_END_MARKER_RE.search(c0.page_content):
+            continue
+        cur_id = c0.metadata.get("chunk_id")
+        key0 = (source, cur_id)
+        if key0 not in seen:
+            extra.append(c0)
+            seen.add(key0)
         for c in by_source.get(source, []):
             cid = c.metadata.get("chunk_id")
             if cid is None or cid <= cur_id:
@@ -377,7 +391,7 @@ def ask_llm(question: str, retriever, embeddings, chunks: list) -> tuple[str, li
     docs = docs[: 3 if contact_chunks else 5]
     extra_rows = pin_relevant_table_rows(question, docs, chunks)
     extra_headers = pin_table_header_chunks(docs + extra_rows, chunks)
-    extra_continuation = pin_list_continuation_chunks(docs, chunks)
+    extra_continuation = pin_list_continuation_chunks(candidates, chunks)
     # Put surgical fix-ups first so they survive format_context's char budget
     # even when the original top-5 already fills most of it.
     docs = extra_rows + extra_headers + extra_continuation + docs
