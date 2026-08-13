@@ -462,7 +462,7 @@ def _call_groq(system_text: str, user_text: str) -> str:
     raise last_exc
 
 
-def ask_llm(question: str, retriever, embeddings, chunks: list) -> tuple[str, list[str], str]:
+def ask_llm(question: str, retriever, embeddings, chunks: list) -> tuple[str, list[str], str, dict]:
     pinned = find_by_doc_number(question, chunks)
     candidates = retriever.invoke(question)
 
@@ -502,17 +502,27 @@ def ask_llm(question: str, retriever, embeddings, chunks: list) -> tuple[str, li
 
     sources = sorted({d.metadata.get("source", "") for d in docs if d.metadata.get("source")})
 
+    # Excerpts actually used to build the context, grouped by source file, so
+    # the UI can show users exactly what the answer was grounded in.
+    excerpts: dict = {}
+    for d in docs:
+        src = d.metadata.get("source", "")
+        if not src:
+            continue
+        excerpts.setdefault(src, []).append(d.page_content.strip())
+    excerpts = {src: "\n\n---\n\n".join(parts) for src, parts in excerpts.items()}
+
     # Gemini is the primary provider (proven accuracy on this corpus). If its
     # free-tier quota is exhausted (HTTP 429), fall back to Groq automatically
     # rather than showing the user an error.
     try:
         answer = _call_gemini(system_text, user_text)
-        return answer, sources, "gemini"
+        return answer, sources, "gemini", excerpts
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code != 429 or not GROQ_API_KEY:
             raise
     answer = _call_groq(system_text, user_text)
-    return answer, sources, "groq"
+    return answer, sources, "groq", excerpts
 
 
 if not GEMINI_API_KEY:
@@ -540,11 +550,30 @@ if not st.session_state.messages and not pending_question:
             st.session_state.pending_question = s
             st.rerun()
 
+def render_sources(sources: list, excerpts: dict):
+    if not sources:
+        return
+    st.caption("Nguồn: " + ", ".join(sources))
+    for src in sources:
+        text = excerpts.get(src, "").strip()
+        if not text:
+            continue
+        with st.expander(f"📄 Xem đoạn trích từ {src}"):
+            escaped = (
+                text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            )
+            st.markdown(
+                f'<div style="background:#fff8c4; padding:0.8rem 1rem; '
+                f'border-radius:10px; white-space:pre-wrap; line-height:1.5; '
+                f'font-size:0.92rem;">{escaped}</div>',
+                unsafe_allow_html=True,
+            )
+
+
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
-        if msg.get("sources"):
-            st.caption("Nguồn: " + ", ".join(msg["sources"]))
+        render_sources(msg.get("sources") or [], msg.get("excerpts") or {})
 
 typed_question = st.chat_input("Hỏi về học phần, tuyển sinh, tốt nghiệp...")
 question = pending_question or typed_question
@@ -557,14 +586,16 @@ if question:
     with st.chat_message("assistant"):
         with st.spinner("Đang tìm câu trả lời..."):
             try:
-                answer, sources, provider = ask_llm(question, retriever, embeddings, all_chunks)
+                answer, sources, provider, excerpts = ask_llm(question, retriever, embeddings, all_chunks)
             except Exception:
-                answer, sources, provider = (
+                answer, sources, provider, excerpts = (
                     "Xin lỗi, hệ thống đang quá tải. Vui lòng thử lại sau ít phút.",
                     [],
                     None,
+                    {},
                 )
         st.markdown(answer)
-        if sources:
-            st.caption("Nguồn: " + ", ".join(sources))
-    st.session_state.messages.append({"role": "assistant", "content": answer, "sources": sources})
+        render_sources(sources, excerpts)
+    st.session_state.messages.append(
+        {"role": "assistant", "content": answer, "sources": sources, "excerpts": excerpts}
+    )
