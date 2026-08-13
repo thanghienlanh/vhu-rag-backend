@@ -34,7 +34,70 @@ from rag_chain import build_prompt, format_context  # noqa: E402
 from rag_config import EMBEDDING_MODEL, FAISS_FULL_PATH, PAPERS_DIR  # noqa: E402
 from reranker import rerank_documents  # noqa: E402
 
-st.set_page_config(page_title="VHU Document Assistant", page_icon="📚")
+st.set_page_config(page_title="VHU Document Assistant", page_icon="📚", layout="centered")
+
+st.markdown(
+    """
+    <style>
+    .stApp {
+        background: linear-gradient(180deg, #f4f7fc 0%, #ffffff 260px);
+    }
+    .block-container {
+        max-width: 760px;
+        padding-top: 1.2rem;
+    }
+    .vhu-hero {
+        background: linear-gradient(120deg, #123a70 0%, #1e5aa8 60%, #2f74c9 100%);
+        border-radius: 18px;
+        padding: 1.6rem 1.8rem;
+        margin-bottom: 1.4rem;
+        box-shadow: 0 8px 24px rgba(18, 58, 112, 0.18);
+    }
+    .vhu-hero h1 {
+        color: #ffffff;
+        font-size: 1.55rem;
+        font-weight: 800;
+        margin: 0 0 0.25rem 0;
+        letter-spacing: -0.01em;
+    }
+    .vhu-hero p {
+        color: #cfe0f7;
+        font-size: 0.92rem;
+        margin: 0;
+    }
+    div[data-testid="stChatMessage"] {
+        border-radius: 16px;
+        padding: 0.9rem 1.1rem;
+        margin-bottom: 0.6rem;
+        box-shadow: 0 1px 3px rgba(16, 24, 40, 0.06);
+    }
+    div[data-testid="stChatMessage"]:has(div[data-testid="stChatMessageAvatarUser"]) {
+        background: #eaf1fc;
+    }
+    div[data-testid="stChatMessage"]:has(div[data-testid="stChatMessageAvatarAssistant"]) {
+        background: #ffffff;
+        border: 1px solid #eef1f6;
+    }
+    .stChatInput textarea, div[data-testid="stChatInput"] {
+        border-radius: 14px !important;
+    }
+    .vhu-chip-row { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.2rem 0 1.2rem 0; }
+    div[data-testid="stCaptionContainer"] p {
+        background: #f1f5fb;
+        display: inline-block;
+        padding: 0.15rem 0.6rem;
+        border-radius: 999px;
+        font-size: 0.78rem;
+        color: #4a5b74;
+    }
+    </style>
+    <div class="vhu-hero">
+        <h1>📚 VHU Document Assistant</h1>
+        <p>Trợ lý hỏi-đáp thông báo học vụ — Trường Đại học Văn Hiến</p>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 def _secret_or_env(key: str, default: str = "") -> str:
     try:
@@ -432,9 +495,6 @@ def ask_llm(question: str, retriever, embeddings, chunks: list) -> tuple[str, li
     return answer, sources, "groq"
 
 
-st.title("📚 VHU Document Assistant")
-st.caption("Trợ lý hỏi-đáp thông báo học vụ — Trường Đại học Văn Hiến")
-
 if not GEMINI_API_KEY:
     st.error("Thiếu GEMINI_API_KEY. Vào Settings → Secrets trên Streamlit Cloud để thêm.")
     st.stop()
@@ -444,13 +504,32 @@ retriever, embeddings, all_chunks = init_retriever()
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+pending_question = st.session_state.pop("pending_question", None)
+
+if not st.session_state.messages and not pending_question:
+    st.markdown("###### 💡 Câu hỏi gợi ý")
+    suggestions = [
+        "Thời hạn đăng ký đề tài NCKH năm học này?",
+        "SV khóa 2024 đăng ký học phần đợt mấy?",
+        "Địa điểm nhận bằng tốt nghiệp ở đâu?",
+        "IELTS bao nhiêu điểm tương đương Bậc 3?",
+    ]
+    cols = st.columns(2)
+    for i, s in enumerate(suggestions):
+        if cols[i % 2].button(s, key=f"chip_{i}", use_container_width=True):
+            st.session_state.pending_question = s
+            st.rerun()
+
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
         if msg.get("sources"):
             st.caption("Nguồn: " + ", ".join(msg["sources"]))
 
-if question := st.chat_input("Hỏi về học phần, tuyển sinh, tốt nghiệp..."):
+typed_question = st.chat_input("Hỏi về học phần, tuyển sinh, tốt nghiệp...")
+question = pending_question or typed_question
+
+if question:
     st.session_state.messages.append({"role": "user", "content": question})
     with st.chat_message("user"):
         st.markdown(question)
