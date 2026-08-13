@@ -196,6 +196,25 @@ def sources_matching_academic_year(question: str, chunks: list) -> set:
     return sources
 
 
+_ENHANCED_TERM_RE = re.compile(r"tăng\s*cường", re.IGNORECASE)
+
+
+def drop_off_scope_enhanced_semester_docs(question: str, docs: list) -> list:
+    """"Học kỳ tăng cường" (enhancement/supplementary semester) notices restate
+    the same policy sections (min/max tín chỉ, đăng ký...) as regular-semester
+    notices but with different numbers, using near-identical wording. When a
+    question doesn't ask about the enhancement semester, these near-duplicate
+    chunks just add conflicting numbers to the context and have been observed
+    to make the LLM refuse to answer rather than pick the (correct) regular-
+    semester figure. If dropping them would leave nothing, keep the original
+    list rather than emptying the context.
+    """
+    if _ENHANCED_TERM_RE.search(question):
+        return docs
+    filtered = [d for d in docs if not _ENHANCED_TERM_RE.search(d.page_content)]
+    return filtered if filtered else docs
+
+
 _CONTACT_INTENT_RE = re.compile(r"địa điểm|ở đâu|liên hệ|hotline|số điện thoại", re.IGNORECASE)
 _CONTACT_INFO_RE = re.compile(r"hotline|trụ sở|đường dây nóng|địa điểm|địa chỉ", re.IGNORECASE)
 _DOT_BATCH_RE = re.compile(r"đợt\s*(\d)\s*/\s*(20\d{2})", re.IGNORECASE)
@@ -475,6 +494,7 @@ def ask_llm(question: str, retriever, embeddings, chunks: list) -> tuple[str, li
     # Put surgical fix-ups first so they survive format_context's char budget
     # even when the original top-5 already fills most of it.
     docs = extra_rows + extra_headers + extra_continuation + docs
+    docs = drop_off_scope_enhanced_semester_docs(question, docs)
     context = format_context(docs, question)
     messages = build_prompt().format_messages(context=context, question=question)
     system_text = "\n\n".join(m.content for m in messages if getattr(m, "type", "") == "system")

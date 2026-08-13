@@ -370,6 +370,8 @@ Quy tắc:
 8. Với câu hỏi về đối tượng/điều kiện, trả lời đầy đủ các ràng buộc trong CONTEXT (khóa, năm học, khoa, số lượng...), không rút gọn thành câu chung chung.
 9. Với câu hỏi yêu cầu liệt kê (đợt, danh sách, mốc thời gian), liệt kê các mục có trong CONTEXT; nếu CONTEXT chỉ có một phần thì trả lời phần đó.
 10. Kết thúc bằng dòng: Nguồn: [tên file chính xác]. Chỉ liệt kê file thật sự được dùng để tạo câu trả lời.
+11. QUAN TRỌNG — nếu CONTEXT chứa nhiều tài liệu về cùng chủ đề nhưng cho đối tượng/thời điểm khác nhau (ví dụ một đoạn ghi "học kỳ chính: tối thiểu 12 tín chỉ" và một đoạn khác ghi "học kỳ tăng cường: tối thiểu 06 tín chỉ"), đây KHÔNG phải là mâu thuẫn hay "không đủ bằng chứng". Hãy chọn con số từ đoạn KHÔNG ghi "tăng cường" (tức áp dụng cho học kỳ chính, là trường hợp mặc định) trừ khi câu hỏi nói rõ "học kỳ tăng cường", và trả lời dứt khoát bằng con số đó kèm trích nguồn. Việc tồn tại một đoạn khác với con số khác không phải lý do để trả lời "{no_info_answer}".
+12. QUAN TRỌNG — khi câu hỏi hỏi về địa điểm/liên hệ, hãy quét TOÀN BỘ CONTEXT (kể cả các đoạn ở xa nhau) để tìm mọi dòng bắt đầu bằng "Địa chỉ:", "Trụ sở", hoặc "Hotline:" liên quan đến cùng đơn vị được hỏi, và PHẢI đưa đầy đủ các dòng đó vào câu trả lời — kể cả khi chúng nằm ở một đoạn CONTEXT khác với đoạn nêu tên đơn vị. Không được chỉ nêu tên đơn vị (ví dụ chỉ nói "Trung tâm Chăm sóc Người học") mà bỏ sót địa chỉ hoặc số hotline nếu CONTEXT có ở bất kỳ đâu.
 
 """
 
